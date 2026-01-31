@@ -1,5 +1,5 @@
 #!/bin/bash
-# moltbot-maintainer setup script
+# openclaw-maintainer setup script
 # creates symlinks for claude code and codex cli
 
 set -e
@@ -7,7 +7,7 @@ set -e
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMMANDS_DIR="$SKILL_DIR/commands"
 
-echo "Setting up moltbot-maintainer skill..."
+echo "Setting up openclaw-maintainer skill..."
 
 # command files to link
 CMDS=(reviewpr.md preparepr.md mergepr.md)

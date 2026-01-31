@@ -1,4 +1,4 @@
-# moltbot-maintainer skill config
+# openclaw-maintainer skill config
 # preferred models, falls back to session default if not available
 
 models:
