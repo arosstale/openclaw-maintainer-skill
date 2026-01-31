@@ -8,6 +8,11 @@ Input
 DO (review only)
 Goal: produce a thorough review and a clear recommendation (READY for /preparepr vs NEEDS WORK). Do NOT merge, do NOT push, do NOT make code changes that you intend to keep.
 
+SAFETY (read before doing anything)
+- NEVER push to `main` or `origin/main`. Not during review, not ever.
+- Do NOT stop or kill the gateway. Do not run gateway stop commands, do not kill processes on port 18792.
+- Do NOT run `git push` at all during review. This is a read-only operation.
+
 EXECUTION RULE (CRITICAL)
 - EXECUTE THIS COMMAND. DO NOT JUST PLAN.
 - After you print the TODO checklist, immediately continue and run the shell commands.
@@ -22,13 +27,17 @@ Writing style for all output
 - no em dashes or en dashes, ever
 - use commas or separate sentences instead
 
-Safety
-- Do NOT stop or kill the gateway. Do not run gateway stop commands, do not kill processes on port 18792.
-
 Completion criteria
 - You ran the commands in the worktree and inspected the PR, you are not guessing.
 - You produced the structured review A through H.
 - You saved the full review to .local/review.md inside the worktree.
+
+## Step 0: Verify gh auth
+
+```sh
+gh auth status
+```
+If this fails, stop and report. Do not proceed without valid GitHub auth.
 
 ## First: Create a TODO checklist
 Create a checklist of all review steps. Print it. Then keep going and execute.
@@ -61,14 +70,7 @@ mkdir -p .local
 ```
 
 From here on, ALL commands run inside the worktree directory.
-
-0) Claim the PR first
-Assign yourself so others know someone is reviewing.
-
-```sh
-gh_user=$(gh api user --jq .login)
-gh pr edit <PR> --add-assignee "$gh_user"
-```
+The worktree starts on origin/main intentionally so you can check for existing implementations before looking at the PR code.
 
 1) Identify PR meta and context
 
@@ -79,25 +81,31 @@ gh pr view <PR> --json number,title,state,isDraft,author,baseRefName,headRefName
 2) Check if this already exists in main (before looking at PR branch)
 You are currently on origin/main in the worktree.
 
-- Identify the core feature or fix.
-- Search for existing implementations.
+- Identify the core feature or fix from the PR title and description.
+- Search for existing implementations using keywords from: the PR title, changed file paths, and function/component names visible in the diff.
 
 ```sh
-# Prefer rg if available
-rg -n "<relevant_keyword>" -S src packages apps ui || true
+# Use keywords from the PR title and changed files
+rg -n "<keyword_from_pr_title>" -S src packages apps ui || true
+rg -n "<function_or_component_name>" -S src packages apps ui || true
 
-# Or grep
-grep -R "<relevant_keyword>" src/ --include="*.ts" || true
-
-git log --oneline --all --grep="<related keyword>" | head -20
+git log --oneline --all --grep="<keyword_from_pr_title>" | head -20
 ```
 
 If it already exists, call it out as a BLOCKER or at least IMPORTANT.
 
-3) Read the PR description carefully
+3) Claim the PR
+Assign yourself so others know someone is reviewing. Skip if the PR looks like spam or is a draft you plan to recommend closing.
+
+```sh
+gh_user=$(gh api user --jq .login)
+gh pr edit <PR> --add-assignee "$gh_user"
+```
+
+4) Read the PR description carefully
 Use the body from step 1. Summarize goal, scope, and missing context.
 
-4) Read the diff thoroughly
+5) Read the diff thoroughly
 
 Minimum:
 ```sh
@@ -126,24 +134,35 @@ git checkout temp/pr-<PR>
 git reset --hard origin/main
 ```
 
-5) Validate the change is needed and valuable
+6) Validate the change is needed and valuable
 Be honest. Call out low value AI slop.
 
-6) Evaluate implementation quality
+7) Evaluate implementation quality
 Correctness, design, performance, ergonomics.
 
-7) Security review (do not skip)
-OpenClaw run with access to user tools, files, messages, and APIs.
+8) Security review (do not skip)
+OpenClaw subagents run with full disk access, including git, gh, and shell.
 Check auth, input validation, secrets, dependencies, tool safety, privacy.
 
-8) Tests and verification
+9) Tests and verification
 What exists, what is missing, and what would be a minimal regression test.
 
-9) Key question
+10) Docs check
+Check if the PR touches code that has related documentation (README, docs/, inline API docs, config examples).
+- If docs exist for the changed area and the PR doesn't update them, flag as IMPORTANT.
+- If the PR adds a new feature or config option with no docs at all, flag as IMPORTANT.
+- If the change is purely internal with no user-facing impact, skip this.
+
+11) Changelog check
+Check if CHANGELOG.md exists and whether the PR warrants an entry.
+- If the project has a CHANGELOG.md and this PR is user-facing (feature, fix, breaking change), flag missing entry as IMPORTANT.
+- /preparepr will handle adding the entry, just flag it here.
+
+12) Key question
 Can /preparepr fix the issues ourselves, or does the contributor need to update the PR.
 
-10) Save findings to the worktree (MANDATORY)
-Write the full structured review (sections A through H) to:
+13) Save findings to the worktree (MANDATORY)
+Write the full structured review (sections A through J) to:
 - .local/review.md
 
 EXECUTE THIS, DO NOT JUST SAY YOU DID IT:
@@ -157,7 +176,7 @@ wc -l .local/review.md
 
 This is required so /preparepr and /mergepr can read it.
 
-11) Output (structured)
+14) Output (structured)
 Produce a review with these sections, and make it match what you saved to .local/review.md.
 
 A) TL;DR recommendation
@@ -177,9 +196,15 @@ E) Concerns / questions (actionable)
 
 F) Tests
 
-G) Follow ups (optional)
+G) Docs status
+- Are related docs up to date, missing, or not applicable?
 
-H) Suggested PR comment (optional)
+H) Changelog
+- Does CHANGELOG.md need an entry? What category (added, changed, fixed, removed)?
+
+I) Follow ups (optional)
+
+J) Suggested PR comment (optional)
 
 Guardrails
 - Worktree only

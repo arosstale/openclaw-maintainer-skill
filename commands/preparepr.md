@@ -5,11 +5,10 @@ Input
   - If missing: ALWAYS ask. Never auto-detect from conversation.
   - If ambiguous: ask.
 
-⚠️ CRITICAL: NEVER KILL OR STOP THE OpenClaw GATEWAY
-- Do NOT run gateway stop commands.
-- Do NOT kill processes.
-- Do NOT touch port 18792.
-- The gateway is what is running you. Killing it kills your own session.
+SAFETY (read before doing anything)
+- NEVER push to `main` or `origin/main`. All pushes go to the PR head branch only.
+- NEVER run `git push` without specifying the remote and branch explicitly. No bare `git push`.
+- Do NOT run gateway stop commands. Do NOT kill processes. Do NOT touch port 18792. The gateway is what is running you.
 
 DO (prep only)
 Goal: make the PR branch clean on top of main, fix issues from /reviewpr, run gates, commit fixes, and push back to the PR branch. Do NOT merge to main during this command.
@@ -22,7 +21,8 @@ EXECUTION RULE (CRITICAL)
 
 Known footguns
 - Repo path is ~/Development/openclaw. If you cd into ~/openclaw you will get "not a git repository".
-- Do not run git clean -fdx, it would delete .local/ artifacts.
+- Do not run `git clean -fdx`, it would delete .local/ artifacts.
+- Do not run `git add -A` or `git add .` blindly. Always stage specific files you changed.
 
 Completion criteria
 - You rebased the PR commits onto origin/main.
@@ -32,6 +32,13 @@ Completion criteria
 - You pushed the updated HEAD back to the PR head branch.
 - You saved a prep summary to .local/prep.md.
 - Final output is exactly: PR is ready for /mergepr
+
+## Step 0: Verify gh auth
+
+```sh
+gh auth status
+```
+If this fails, stop and report. Do not proceed without valid GitHub auth.
 
 ## First: Create a TODO checklist
 Create a checklist of all prep steps. Print it. Then keep going and execute.
@@ -109,11 +116,11 @@ git rebase origin/main
 ```
 
 If conflicts happen:
-- Resolve
-- git add -A
-- git rebase --continue
+- Resolve each conflicted file
+- `git add <resolved_file>` for each file (do NOT use `git add -A`)
+- `git rebase --continue`
 
-If the rebase gets confusing, stop and report.
+If the rebase gets confusing or you have resolved conflicts 3+ times, stop and report.
 
 4) Fix issues from .local/review.md
 Requirements:
@@ -128,7 +135,51 @@ Include:
 - what files you touched
 - any behavior changes
 
-5) Run full gates (BEFORE pushing)
+5) Update CHANGELOG.md (if flagged in review)
+
+Check .local/review.md section H for changelog guidance. If the review flagged a missing changelog entry:
+
+```sh
+# Check if CHANGELOG.md exists
+ls CHANGELOG.md 2>/dev/null
+```
+
+If it exists and the PR is user-facing (feature, fix, breaking change):
+- Read the existing format and follow it
+- Add an entry under the appropriate section (Added, Changed, Fixed, Removed)
+- Reference the PR number and contributor
+- Keep the entry concise, one line
+
+If the review did not flag changelog, skip this step.
+
+6) Update docs (if flagged in review)
+
+Check .local/review.md section G for docs guidance. If the review flagged missing or outdated docs:
+- Update only the docs directly related to the PR changes
+- Keep scope tight, do not rewrite unrelated docs
+
+If the review did not flag docs, skip this step.
+
+7) Commit any fixes you made during prep
+
+Stage only the specific files you changed (never `git add -A` or `git add .`):
+```sh
+git add <file1> <file2> ...
+```
+
+Preferred commit tool (OpenClaw CLI tool, available on this machine):
+```sh
+committer "fix: <summary> (#<PR>) (thanks @$contrib)" <changed files>
+```
+
+If `committer` is not found, fall back to:
+```sh
+git commit -m "fix: <summary> (#<PR>) (thanks @$contrib)"
+```
+
+8) Run full gates (BEFORE pushing)
+
+Gates run on the committed state, which is what will be pushed.
 
 ```sh
 pnpm install
@@ -137,29 +188,30 @@ pnpm build
 pnpm test
 ```
 
-All must pass. If something fails, fix and rerun until green.
+All must pass. If something fails, fix, commit the fix, and rerun.
+MAX 3 ATTEMPTS. If gates still fail after 3 fix-and-rerun cycles, stop and report the failures. Do not loop indefinitely.
 
-6) Commit any fixes you made during prep
+9) Push updates back to the PR head branch
 
-Preferred:
-```sh
-committer "fix: <summary> (#<PR>) (thanks @$contrib)" <changed files>
-```
-
-If committer is not available, use git commit.
-
-7) Push updates back to the PR head branch
+IMPORTANT: You are pushing to the PR's head branch, NEVER to main.
+If the PR is from a fork, you need push access to the fork repo. If push fails with permission denied, stop and report.
 
 ```sh
 # Ensure remote for PR head exists
 git remote add prhead "$head_repo_url.git" 2>/dev/null || git remote set-url prhead "$head_repo_url.git"
 
 # Force with lease is required after rebase
+# Double check: $head must NOT be "main" or "master"
+echo "Pushing to branch: $head"
+if [ "$head" = "main" ] || [ "$head" = "master" ]; then
+  echo "ERROR: head branch is main/master. This is wrong. Stopping."
+  exit 1
+fi
 git push --force-with-lease prhead HEAD:$head
 ```
 
-8) Verify PR is not behind main (MANDATORY)
-After pushing, confirm the PR branch includes latest main. If this fails, repeat steps 2 through 7.
+10) Verify PR is not behind main (MANDATORY)
+After pushing, confirm the PR branch includes latest main. If this fails, repeat steps 2 through 9.
 
 ```sh
 git fetch origin main
@@ -170,7 +222,7 @@ git branch -D pr-<PR>-verify 2>/dev/null || true
 
 If the PR is still behind main, do NOT proceed. Re-fetch, rebase, and push again.
 
-9) Write prep summary artifacts (MANDATORY)
+11) Write prep summary artifacts (MANDATORY)
 Update .local/prep.md with:
 - current HEAD sha (git rev-parse HEAD)
 - a short bullet list of what you changed
@@ -188,7 +240,7 @@ ls -la .local/prep.md
 wc -l .local/prep.md
 ```
 
-10) Output
+12) Output
 Include a diff stat summary showing lines added vs removed. Run:
 ```sh
 git diff --stat origin/main..HEAD
@@ -204,4 +256,6 @@ Report the total: X files changed, Y insertions(+), Z deletions(-)
 Rules
 - Worktree only
 - Do not delete the worktree on success, /mergepr may reuse it
-- Do not run gh pr merge
+- Do not run `gh pr merge`
+- NEVER push to main. Only push to the PR head branch.
+- All gates must pass before pushing. No pushing broken code.

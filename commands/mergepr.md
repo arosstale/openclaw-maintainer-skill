@@ -5,10 +5,10 @@ Input
   - If missing: ALWAYS ask. Never auto-detect from conversation.
   - If ambiguous: ask.
 
-⚠️ CRITICAL: NEVER KILL OR STOP THE OpenClaw GATEWAY
-- Do NOT run gateway stop commands.
-- Do NOT kill processes.
-- Do NOT touch port 18792.
+SAFETY (read before doing anything)
+- The ONLY way code reaches main is `gh pr merge --squash`. No `git push` to main, ever.
+- Do NOT run gateway stop commands. Do NOT kill processes. Do NOT touch port 18792.
+- Do NOT run `git push` at all during merge. The only push-like operation is `gh pr merge`.
 
 DO (merge only)
 Goal: PR must end in GitHub state = MERGED (never CLOSED). Assumes /preparepr already ran.
@@ -23,12 +23,20 @@ Known footguns
 - Repo path is ~/Development/openclaw.
 - This command must read .local/review.md and .local/prep.md in the worktree. Do not skip.
 - Cleanup must remove the real worktree directory .worktrees/pr-<PR>, not a different path.
+- After cleanup, .local/ artifacts are gone. This is expected.
 
 Completion criteria
 - gh pr merge succeeded
 - PR state is MERGED
 - merge sha recorded
 - cleanup only after successful merge
+
+## Step 0: Verify gh auth
+
+```sh
+gh auth status
+```
+If this fails, stop and report. Do not proceed without valid GitHub auth.
 
 ## First: Create a TODO checklist
 Create a checklist of all merge steps. Print it. Then keep going and execute.
@@ -118,37 +126,32 @@ git merge-base --is-ancestor origin/main pr-<PR> || echo "PR branch is behind ma
 
 If anything is failing or behind, stop and say to run /preparepr.
 
-3) Optional: changelog only commit
-Only if you are confident only CHANGELOG.md is missing and needed.
-If anything beyond CHANGELOG.md needs changes, stop and run /preparepr.
+3) Merge PR (squash and delete branch)
 
+If any checks are still running, use --auto to queue the merge:
 ```sh
-# Move to PR tip
-git reset --hard pr-<PR>
-
-# If you edit CHANGELOG.md:
-# committer "chore: changelog (#<PR>) (thanks @$contrib)" CHANGELOG.md
-# git remote add prhead "$head_repo_url.git" 2>/dev/null || git remote set-url prhead "$head_repo_url.git"
-# git push --force-with-lease prhead HEAD:$head
-# gh pr checks <PR> --watch
-```
-
-4) Merge PR (squash and delete branch)
-
-```sh
-gh pr merge <PR> --squash --delete-branch
+# Check status first
+check_status=$(gh pr checks <PR> 2>&1)
+if echo "$check_status" | grep -q "pending\|queued"; then
+  echo "Checks still running, using --auto to queue merge"
+  gh pr merge <PR> --squash --delete-branch --auto
+  echo "Merge queued. Monitor with: gh pr checks <PR> --watch"
+else
+  gh pr merge <PR> --squash --delete-branch
+fi
 ```
 
 If merge fails, report the error and stop. Do not retry in a loop.
+If the PR needs changes beyond what /preparepr already did, stop and say to run /preparepr again.
 
-5) Get merge sha
+4) Get merge sha
 
 ```sh
 merge_sha=$(gh pr view <PR> --json mergeCommit --jq '.mergeCommit.oid')
 echo "merge_sha=$merge_sha"
 ```
 
-6) Optional: comment
+5) Optional: comment
 
 ```sh
 gh pr comment <PR> --body "Merged via squash.
@@ -158,14 +161,14 @@ gh pr comment <PR> --body "Merged via squash.
 Thanks @$contrib!"
 ```
 
-7) Verify PR state == MERGED
+6) Verify PR state == MERGED
 
 ```sh
 gh pr view <PR> --json state --jq .state
 ```
 
-8) Cleanup worktree (only on success)
-Only run cleanup if step 7 returned MERGED.
+7) Cleanup worktree (only on success)
+Only run cleanup if step 6 returned MERGED. Note: this deletes .local/ artifacts (review.md, prep.md).
 
 ```sh
 cd ~/Development/openclaw
@@ -181,3 +184,5 @@ Rules
 - Do not close PRs
 - PR must end in MERGED state
 - Only cleanup after merge success
+- NEVER push to main. `gh pr merge --squash` is the only path to main.
+- Do NOT run `git push` at all in this command.
