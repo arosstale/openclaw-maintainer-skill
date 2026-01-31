@@ -1,0 +1,9 @@
+# moltbot-maintainer skill config
+# preferred models, falls back to session default if not available
+
+models:
+  review: opus            # alias or full model id (e.g. anthropic/claude-opus-4-5)
+  prepare: gpt            # alias or full model id (e.g. openai-codex/gpt-5.2)
+  merge: gpt              # alias or full model id (e.g. openai-codex/gpt-5.2)
+  prepare_thinking: high  # thinking level (off, low, high)
+  merge_thinking: high    # thinking level (off, low, high)
