@@ -68,7 +68,7 @@ If config not present or model not available, uses session default model.
 Spawn a subagent with a task referencing the command file:
 
 ```
-sessions_spawn task:"Review PR #<number> in openclaw repo. Read commands/reviewpr.md and follow its instructions exactly." model:opus runTimeoutSeconds:600
+sessions_spawn task:"Review PR #<number> in openclaw repo. Read commands/reviewpr.md and follow its instructions exactly." model:opus runTimeoutSeconds:0 (infinite)
 ```
 
 If opus isn't configured, omit the model param to use the session default.
@@ -78,7 +78,7 @@ If opus isn't configured, omit the model param to use the session default.
 Spawn a subagent for prep (only after user approves):
 
 ```
-sessions_spawn task:"Prepare PR #<number> in openclaw repo. Read commands/preparepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:1800
+sessions_spawn task:"Prepare PR #<number> in openclaw repo. Read commands/preparepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:0 (infinite)
 ```
 
 If gpt isn't configured, omit the model param. Thinking is optional but recommended.
@@ -88,7 +88,7 @@ If gpt isn't configured, omit the model param. Thinking is optional but recommen
 Spawn a subagent for merge (only after prep is done and user says yes):
 
 ```
-sessions_spawn task:"Merge PR #<number> in openclaw repo. Read commands/mergepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:900
+sessions_spawn task:"Merge PR #<number> in openclaw repo. Read commands/mergepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:0 (infinite)
 ```
 
 ## Important Notes
