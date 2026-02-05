@@ -50,21 +50,27 @@ cd ~/Development/openclaw
 # Sanity: confirm you are in the repo
 git rev-parse --show-toplevel
 
-WORKTREE_DIR=".worktrees/pr-<PR>"
+PR=<PR>
+WORKTREE_DIR=".worktrees/pr-$PR"
+WORKTREE_BRANCH="pr/$PR"
+
 git fetch origin main
 
 # Reuse existing worktree if it exists, otherwise create new
 if [ -d "$WORKTREE_DIR" ]; then
   cd "$WORKTREE_DIR"
-  git checkout temp/pr-<PR> 2>/dev/null || git checkout -b temp/pr-<PR>
+  git checkout "$WORKTREE_BRANCH" 2>/dev/null || git checkout -b "$WORKTREE_BRANCH"
   git fetch origin main
   git reset --hard origin/main
 else
-  git worktree add "$WORKTREE_DIR" -b temp/pr-<PR> origin/main
+  git worktree add "$WORKTREE_DIR" -b "$WORKTREE_BRANCH" origin/main
   cd "$WORKTREE_DIR"
 fi
 
 mkdir -p .local
+
+# Sanity, from here on, ALL commands run inside the worktree
+pwd
 ```
 
 From here on, ALL commands run inside the worktree directory.
@@ -88,7 +94,7 @@ fi
 
 if [ -f .local/prep.md ]; then
   echo "Found .local/prep.md"
-  sed -n '1,120p' .local/prep.md
+  sed -n '1,160p' .local/prep.md
 else
   echo "Missing .local/prep.md. Stop and run /preparepr first."
   exit 1
@@ -102,31 +108,87 @@ If review.md says NEEDS WORK, NEEDS DISCUSSION, or NOT USEFUL, stop.
 1) Identify PR meta
 
 ```sh
-gh pr view <PR> --json number,title,state,isDraft,author,headRefName,baseRefName,headRepository,body --jq '{number,title,state,isDraft,author:.author.login,head:.headRefName,base:.baseRefName,headRepo:.headRepository.nameWithOwner,body}'
+gh pr view <PR> --json number,title,state,isDraft,author,headRefName,baseRefName,headRepository,body,headRefOid --jq '{number,title,state,isDraft,author:.author.login,head:.headRefName,headSha:.headRefOid,base:.baseRefName,headRepo:.headRepository.nameWithOwner,body}'
 contrib=$(gh pr view <PR> --json author --jq .author.login)
 head=$(gh pr view <PR> --json headRefName --jq .headRefName)
+base=$(gh pr view <PR> --json baseRefName --jq .baseRefName)
 head_repo_url=$(gh pr view <PR> --json headRepository --jq .headRepository.url)
+pr_sha=$(gh pr view <PR> --json headRefOid --jq .headRefOid)
+
+if [ -z "$head" ] || [ -z "$pr_sha" ]; then
+  echo "ERROR: could not determine PR head branch or sha"
+  exit 1
+fi
+if [ "$head" = "main" ] || [ "$head" = "master" ] || [ "$base" != "main" ]; then
+  echo "ERROR: unexpected head/base branch, refusing to proceed"
+  echo "head=$head"
+  echo "base=$base"
+  exit 1
+fi
 ```
 
-2) Sanity checks
+2) Verify the remote PR branch includes the latest /preparepr commits (MANDATORY)
+
+/preparepr must have pushed and verified.
+We verify again here so we never merge stale code.
+
+```sh
+expected_sha=$(sed -n 's/^pushed_head_sha=//p' .local/prep.md | head -n 1)
+prep_verified=$(sed -n 's/^push_verified=//p' .local/prep.md | head -n 1)
+
+echo "expected_sha=$expected_sha"
+echo "prep_verified=$prep_verified"
+echo "pr_sha=$pr_sha"
+
+if [ -z "$expected_sha" ]; then
+  echo "ERROR: could not find pushed_head_sha=... in .local/prep.md"
+  echo "Run /preparepr again and make sure it writes machine readable fields"
+  exit 1
+fi
+
+if [ "$prep_verified" != "yes" ]; then
+  echo "ERROR: .local/prep.md does not indicate push_verified=yes"
+  echo "Run /preparepr again"
+  exit 1
+fi
+
+if [ "$expected_sha" != "$pr_sha" ]; then
+  echo "ERROR: PR head sha does not match the last prepared push"
+  echo "This means the PR branch changed after prep, or prep did not actually push"
+  echo "Run /preparepr again"
+  exit 1
+fi
+```
+
+3) Sanity checks
 Stop if any of these are true:
 - PR is a draft
 - required checks are failing
 - branch is behind main
 
 ```sh
+# Draft?
+if gh pr view <PR> --json isDraft --jq .isDraft | grep -q true; then
+  echo "ERROR: PR is a draft, refusing to merge"
+  exit 1
+fi
+
 # Checks
 gh pr checks <PR>
 
 # Behind main?
 git fetch origin main
-git fetch origin pull/<PR>/head:pr-<PR>
-git merge-base --is-ancestor origin/main pr-<PR> || echo "PR branch is behind main, run /preparepr"
+
+git fetch origin pull/<PR>/head:pr-<PR> --force
+if ! git merge-base --is-ancestor origin/main pr-<PR>; then
+  echo "ERROR: PR branch is behind main, run /preparepr"
+  exit 1
+fi
 ```
 
-If anything is failing or behind, stop and say to run /preparepr.
+If required checks are failing, stop and say to run /preparepr, or fix checks, before merge.
 
-3) Merge PR (squash and delete branch)
+4) Merge PR (squash and delete branch)
 
 If any checks are still running, use --auto to queue the merge:
 ```sh
@@ -144,14 +206,14 @@ fi
 If merge fails, report the error and stop. Do not retry in a loop.
 If the PR needs changes beyond what /preparepr already did, stop and say to run /preparepr again.
 
-4) Get merge sha
+5) Get merge sha
 
 ```sh
 merge_sha=$(gh pr view <PR> --json mergeCommit --jq '.mergeCommit.oid')
 echo "merge_sha=$merge_sha"
 ```
 
-5) Optional: comment
+6) Optional: comment
 
 ```sh
 gh pr comment <PR> --body "Merged via squash.
@@ -161,22 +223,27 @@ gh pr comment <PR> --body "Merged via squash.
 Thanks @$contrib!"
 ```
 
-6) Verify PR state == MERGED
+7) Verify PR state == MERGED
 
 ```sh
 gh pr view <PR> --json state --jq .state
 ```
 
-7) Cleanup worktree (only on success)
-Only run cleanup if step 6 returned MERGED. Note: this deletes .local/ artifacts (review.md, prep.md).
+8) Cleanup worktree (only on success)
+Only run cleanup if step 7 returned MERGED. Note: this deletes .local/ artifacts (review.md, prep.md).
 
 ```sh
 cd ~/Development/openclaw
 
 git worktree remove ".worktrees/pr-<PR>" --force
 
-git branch -D temp/pr-<PR> 2>/dev/null || true
+git branch -D "pr/<PR>" 2>/dev/null || true
 git branch -D pr-<PR> 2>/dev/null || true
+
+# Best effort, keep the main repo checkout on main for editor sanity
+if git diff --quiet && git diff --cached --quiet; then
+  git switch main 2>/dev/null || git checkout main || true
+fi
 ```
 
 Rules

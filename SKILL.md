@@ -30,10 +30,10 @@ The actual command files live in this skill's `commands/` folder. Subagents read
 4. **Main agent:** summarizes for user (ready for prep, needs work, concerns)
 5. **User:** "ok prep it" / "fix X first" / "don't merge"
 6. **Main agent:** if approved, spawns gpt subagent (high thinking) via `sessions_spawn`. Subagent reads `commands/preparepr.md`.
-7. **GPT subagent:** rebases, fixes, runs gates, pushes updates to PR branch (never main), pings back `PR is ready for /mergepr`
+7. **GPT subagent:** rebases, fixes, runs gates, commits, pushes updates to the PR head branch (never main), and MUST verify the push landed (local HEAD sha == remote branch sha == gh PR head sha). It also best-effort returns the main repo checkout to `main` so editors show a sane state.
 8. **User:** "merge it"
 9. **Main agent:** spawns gpt subagent (high thinking) via `sessions_spawn`. Subagent reads `commands/mergepr.md`.
-10. **GPT subagent:** merges via `gh pr merge --squash` (the only path to main), pings back merge SHA
+10. **GPT subagent:** verifies the remote PR branch still matches the last prepared push, then merges via `gh pr merge --squash` (the only path to main), pings back merge SHA
 11. **Main agent:** confirms to user with merge SHA
 
 ## ⚠️ ALWAYS USE SUBAGENT
@@ -44,7 +44,7 @@ Review, prep, and merge are long running tasks. NEVER run in the main thread. Al
 
 Preferred models (fall back to session default if not available):
 - Review: `model:opus` (best for nuanced code review)
-- Prep: `model:gpt` with `thinking:high` (methodical fixes + gates)
+- Prep: `model:gpt` with `thinking:high` (methodical fixes + gates + push verification)
 - Merge: `model:gpt` with `thinking:high` (careful merge flow)
 
 ## Config (optional)

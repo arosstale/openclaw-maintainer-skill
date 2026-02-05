@@ -46,30 +46,48 @@ Create a checklist of all review steps. Print it. Then keep going and execute.
 
 All review work happens in an isolated worktree.
 
+Important: keep the main repo checkout clean and on main.
+This helps Cursor and VS Code show sane branch and sync state.
+This is best effort, do not destroy local changes.
+
 ```sh
 cd ~/Development/openclaw
 # Sanity: confirm you are in the repo
 git rev-parse --show-toplevel
 
-WORKTREE_DIR=".worktrees/pr-<PR>"
+# Best effort, keep the main repo checkout on main
+# Do not block review if this fails
+if git diff --quiet && git diff --cached --quiet; then
+  git switch main 2>/dev/null || git checkout main || true
+else
+  echo "NOTE: ~/Development/openclaw has local changes, leaving its branch alone"
+  git status -sb || true
+fi
+
+PR=<PR>
+WORKTREE_DIR=".worktrees/pr-$PR"
+WORKTREE_BRANCH="pr/$PR"
+
 git fetch origin main
 
 # Reuse existing worktree if it exists, otherwise create new
 if [ -d "$WORKTREE_DIR" ]; then
   cd "$WORKTREE_DIR"
-  git checkout temp/pr-<PR> 2>/dev/null || git checkout -b temp/pr-<PR>
+  git checkout "$WORKTREE_BRANCH" 2>/dev/null || git checkout -b "$WORKTREE_BRANCH"
   git fetch origin main
   git reset --hard origin/main
 else
-  git worktree add "$WORKTREE_DIR" -b temp/pr-<PR> origin/main
+  git worktree add "$WORKTREE_DIR" -b "$WORKTREE_BRANCH" origin/main
   cd "$WORKTREE_DIR"
 fi
 
 # Local scratch space that persists across /reviewpr -> /preparepr -> /mergepr
 mkdir -p .local
+
+# Sanity, from here on, ALL commands run inside the worktree
+pwd
 ```
 
-From here on, ALL commands run inside the worktree directory.
 The worktree starts on origin/main intentionally so you can check for existing implementations before looking at the PR code.
 
 1) Identify PR meta and context
@@ -123,14 +141,14 @@ git diff origin/main..pr-<PR>
 ```
 
 If you want to browse the PR version of files directly, you may temporarily check out pr-<PR> in the worktree, but do not commit, do not push.
-Afterwards, return to temp/pr-<PR> and reset to origin/main.
+Afterwards, return to the worktree branch and reset to origin/main.
 
 ```sh
 # Optional, only if needed
 # git checkout pr-<PR>
 # ...inspect files...
 
-git checkout temp/pr-<PR>
+git checkout "$WORKTREE_BRANCH"
 git reset --hard origin/main
 ```
 
