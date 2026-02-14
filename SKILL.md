@@ -1,101 +1,106 @@
 ---
 name: openclaw-maintainer
-description: PR review and merge automation for OpenClaw maintainers. Review with opus, prep and merge with a gpt subagent. Use when asked to review, prep, or merge a PR.
+description: "Review, prepare, and merge PRs for openclaw/openclaw. Script-first: delegates to OpenClaw's own scripts/pr-* wrappers. Use when asked to review, prep, or merge a PR."
 ---
 
 # OpenClaw Maintainer
 
-PR review + prep + merge automation. Uses opus for review, gpt for prep and merge.
+PR pipeline for `openclaw/openclaw`. Three steps, always in order. Repo: `/tmp/openclaw-fork`.
 
-## SAFETY: NEVER PUSH TO MAIN
+## Safety
 
-Subagents have full disk access. The one inviolable rule:
-- NEVER force-push, push, or directly commit to `main` or `origin/main`.
-- All pushes go to PR head branches only.
-- The only way code reaches main is through `gh pr merge --squash`.
-- If gates (lint/build/test) have not passed, do NOT merge.
+- **NEVER push to main.** Code reaches main only through `gh pr merge --squash`.
+- All work in isolated worktrees: `.worktrees/pr-<PR>`.
+- All pushes go to PR head branches with `--force-with-lease`.
 
-## Command Files
+## Pipeline
 
-The actual command files live in this skill's `commands/` folder. Subagents read these directly (they do NOT read this SKILL.md file).
-- `commands/reviewpr.md` - review only
-- `commands/preparepr.md` - rebase, fix, run gates, push fixes, but do NOT merge
-- `commands/mergepr.md` - merge only
+### 1. Review
 
-## Workflow Overview (3 step)
+Read-only. Produce structured findings.
 
-1. **User:** "review PR #2403"
-2. **Main agent:** spawns opus subagent via `sessions_spawn`. Subagent reads `commands/reviewpr.md` and executes.
-3. **Opus subagent:** reviews, pings back findings
-4. **Main agent:** summarizes for user (ready for prep, needs work, concerns)
-5. **User:** "ok prep it" / "fix X first" / "don't merge"
-6. **Main agent:** if approved, spawns gpt subagent (high thinking) via `sessions_spawn`. Subagent reads `commands/preparepr.md`.
-7. **GPT subagent:** rebases, fixes, runs gates, commits, pushes updates to the PR head branch (never main), and MUST verify the push landed (local HEAD sha == remote branch sha == gh PR head sha). It also best-effort returns the main repo checkout to `main` so editors show a sane state.
-8. **User:** "merge it"
-9. **Main agent:** spawns gpt subagent (high thinking) via `sessions_spawn`. Subagent reads `commands/mergepr.md`.
-10. **GPT subagent:** verifies the remote PR branch still matches the last prepared push, then merges via `gh pr merge --squash` (the only path to main), pings back merge SHA
-11. **Main agent:** confirms to user with merge SHA
-
-## ⚠️ ALWAYS USE SUBAGENT
-
-Review, prep, and merge are long running tasks. NEVER run in the main thread. Always use `sessions_spawn` to create a subagent.
-
-## Model Preferences
-
-Preferred models (fall back to session default if not available):
-- Review: `model:opus` (best for nuanced code review)
-- Prep: `model:gpt` with `thinking:high` (methodical fixes + gates + push verification)
-- Merge: `model:gpt` with `thinking:high` (careful merge flow)
-
-## Config (optional)
-
-Create `config.yaml` in this skill folder to override defaults:
-
-```yaml
-# ~/openclaw/skills/openclaw-maintainer/config.yaml
-models:
-  review: opus          # or anthropic/claude-opus-4-5, or leave blank for default
-  prepare: gpt          # or openai-codex/gpt-5.2, or leave blank for default
-  merge: gpt            # or openai-codex/gpt-5.2, or leave blank for default
-  prepare_thinking: high
-  merge_thinking: high
+```bash
+cd /tmp/openclaw-fork
+scripts/pr-review <PR>
 ```
 
-If config not present or model not available, uses session default model.
+The wrapper creates the worktree, fetches meta, and sets up `.local/`. You then:
+- Check existing implementations on main: `rg -n "<keyword>" src/`
+- Read the diff: `gh pr diff <PR>`
+- Evaluate correctness, security, tests, docs, changelog
+- Write `.local/review.md` and `.local/review.json`
 
-## Review Workflow (/reviewpr)
+Recommendation is one of: `READY FOR /prepare-pr`, `NEEDS WORK`, `NEEDS DISCUSSION`, `CLOSE`.
 
-Spawn a subagent with a task referencing the command file:
+Output spec: `{baseDir}/references/review-output.md`
 
-```
-sessions_spawn task:"Review PR #<number> in openclaw repo. Read commands/reviewpr.md and follow its instructions exactly." model:opus runTimeoutSeconds:0 (infinite)
-```
-
-If opus isn't configured, omit the model param to use the session default.
-
-## Prep Workflow (/preparepr)
-
-Spawn a subagent for prep (only after user approves):
-
-```
-sessions_spawn task:"Prepare PR #<number> in openclaw repo. Read commands/preparepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:0 (infinite)
-```
-
-If gpt isn't configured, omit the model param. Thinking is optional but recommended.
-
-## Merge Workflow (/mergepr)
-
-Spawn a subagent for merge (only after prep is done and user says yes):
-
-```
-sessions_spawn task:"Merge PR #<number> in openclaw repo. Read commands/mergepr.md and follow its instructions exactly." model:gpt thinking:high runTimeoutSeconds:0 (infinite)
+Structured findings in `.local/review.json`:
+```json
+{
+  "recommendation": "READY FOR /prepare-pr",
+  "findings": [{"id":"F1","severity":"IMPORTANT","title":"...","fix":"..."}],
+  "tests": {"ran":[],"gaps":[],"result":"pass"},
+  "changelog": "required"
+}
 ```
 
-## Important Notes
+### 2. Prepare
 
-- Subagents read the command file directly, they do NOT read this SKILL.md
-- Each command file is self-contained with all setup, steps, and safety rules
-- If checks or gates fail, report failure and stop, do not force merge
-- If merge fails, report and do NOT retry in a loop
-- PR must end in MERGED state, never CLOSED
-- Code only reaches main through `gh pr merge --squash`, never through direct push
+Rebase, fix findings, run gates, push to PR head.
+
+```bash
+scripts/pr-prepare init <PR>
+```
+
+Then:
+1. Resolve all BLOCKER and IMPORTANT findings from `.local/review.json`
+2. Commit with `scripts/committer "fix: <summary>" <files>`
+3. Run gates: `scripts/pr-prepare gates <PR>`
+4. Push: `scripts/pr-prepare push <PR>`
+5. Verify: local HEAD sha == remote sha == `gh pr view --json headRefOid`
+
+Output spec: `{baseDir}/references/prep-output.md`
+
+Output: `PR is ready for /merge-pr`
+
+### 3. Merge
+
+Squash merge after review + prep artifacts exist.
+
+```bash
+scripts/pr-merge <PR>
+```
+
+Go/no-go:
+- All findings resolved
+- Gates green
+- Branch not behind main
+- Changelog updated
+
+After merge:
+- Verify state is MERGED (never CLOSED)
+- Record merge SHA
+- New contributor? Run `bun scripts/update-clawtributors.ts`
+- Clean up worktree
+
+## Maintainer Checkpoints
+
+**Before prep** (after review):
+- What problem are they solving?
+- What is the optimal implementation?
+- Can we fix everything, or does contributor need to update?
+
+**Before merge** (after prep):
+- Is this properly scoped and typed?
+- Is existing logic reused (not duplicated)?
+- Are tests real, not performative?
+- Any security concerns?
+
+## Rules
+
+- Use `pnpm` for all tooling. Gates: `pnpm build`, `pnpm check`, `pnpm test`.
+- Commit subjects: concise, action-oriented, no PR numbers (those go in merge commit).
+- Merge commit: include `Co-authored-by:` for PR author and maintainer.
+- Changelog is mandatory in this workflow.
+- Process PRs oldest to newest (older = more likely to conflict).
+- Max 3 gate fix-and-rerun cycles. After that, stop and report.
